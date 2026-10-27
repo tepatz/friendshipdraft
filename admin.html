@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Commissioner · Points Players Playoffs Hub</title>
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--tx:#14182b;--mu:#6a7089;--ln:#e3e6f0;--ac:#2347d9;--bad:#c2362b;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1020;--card:#171a30;--tx:#eceefa;--mu:#9aa0c0;--ln:#2a2e4d;--ac:#7b96ff;--bad:#ff7b6e;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0e1020;--card:#171a30;--tx:#eceefa;--mu:#9aa0c0;--ln:#2a2e4d;--ac:#7b96ff;--bad:#ff7b6e;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1000px;margin:0 auto;padding:16px}a{color:var(--ac);text-decoration:none}
+h1{font-size:22px;margin:4px 0 2px}h2{font-size:16px;margin:0 0 10px}.mu{color:var(--mu);font-size:13px}
+.card{background:var(--card);border:1px solid var(--ln);border-radius:12px;padding:14px;margin:14px 0}
+.bar{height:8px;background:var(--ln);border-radius:9px;overflow:hidden;margin:6px 0}.bar i{display:block;height:100%;background:var(--ac)}
+.lb{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}.lb.big{grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin-top:14px}
+.lb>div,.tile{border:1px solid var(--ln);border-radius:10px;padding:12px;background:var(--card)}.lb b{font-size:24px;display:block}
+.tile{display:block;color:var(--tx)}.tile .em{font-size:28px;display:block}.tile b{font-size:17px;display:block}
+.sc{overflow-x:auto}table{border-collapse:collapse;width:100%;min-width:640px}th,td{border-bottom:1px solid var(--ln);padding:6px 8px;text-align:left;font-size:13px;vertical-align:top}
+th{color:var(--mu);font-weight:600}td small{color:var(--mu)}.tot td{font-weight:700}
+input,select,button,textarea{font:inherit;color:var(--tx);background:var(--bg);border:1px solid var(--ln);border-radius:8px;padding:7px 9px}
+button{cursor:pointer;background:var(--ac);color:#fff;border-color:var(--ac)}button.g{background:none;color:var(--ac)}
+.pk{display:grid;grid-template-columns:90px 1fr;gap:8px;align-items:center;margin:6px 0}.row{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0}
+td input[type=number]{width:56px}.err{color:var(--bad);font-size:13px;min-height:18px}summary{cursor:pointer;font-weight:600}textarea{width:100%}
+</style></head><body><div class="mu" style="padding:6px 16px;border-bottom:1px solid var(--ln)">Commissioner mode</div><main><div id="app"><div class="card mu">Loading…</div></div></main>
+<script>
+const ADMIN=true;
+let db,uid=null,admin=false,drafts={},slots={},picks={},stats={},msg="",pending=false,ready=0;
+const $=id=>document.getElementById(id),app=$("app");
+const lsGet=k=>{try{return localStorage.getItem(k)}catch(e){return null}};
+const key=n=>String(n).normalize("NFD").replace(/[\u0300-\u036f]/g,"").trim().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
+const esc=t=>String(t==null?"":t).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const dk=(id,d)=>id+"."+key(d);
+const pick=(id,d,i)=>(picks[dk(id,d)]&&picks[dk(id,d)].r&&picks[dk(id,d)].r[i])||"";
+const pts=(id,n)=>{const c=drafts[id],s=(stats[id]&&stats[id].p&&stats[id].p[key(n)]&&stats[id].p[key(n)].s)||{};return c.scoring.reduce((a,x)=>a+(s[x.id]||0)*x.pts,0)};
+const xs=(id,d)=>(picks[dk(id,d)]||{}).x||{};
+const dropped=(id,d,i)=>Object.values(xs(id,d)).find(t=>t.from===i);
+const slotPts=(id,d,i)=>{const p=pick(id,d,i);if(!p)return 0;const t=dropped(id,d,i),u=xs(id,d)[i];if(t)return drafts[id].scoring.reduce((a,x)=>a+((t.fr||{})[x.id]||0)*x.pts,0);if(u){const s=(((stats[id]||{}).p||{})[key(p)]||{}).s||{};return drafts[id].scoring.reduce((a,x)=>a+((s[x.id]||0)-((u.b||{})[x.id]||0))*x.pts,0)}return pts(id,p)};
+const taken=(id,d,i,v)=>{const k=key(v),c=drafts[id];for(const o of c.drafters)for(let j=0;j<c.slots.length;j++)if((o!==d||j!==i)&&key(pick(id,o,j))===k)return v+" is already taken ("+o+", "+c.slots[j]+").";return""};
+const total=(id,d)=>drafts[id].slots.reduce((a,_,i)=>a+slotPts(id,d,i),0);
+const made=(id,d)=>drafts[id].slots.filter((_,i)=>pick(id,d,i)).length;
+const mine=id=>{const v=window._w||lsGet("who-"+id);return drafts[id].drafters.includes(v)?v:undefined};
+const can=()=>true;
+const fmt=x=>(x>0?"+":"")+x;
+function sub(n,o){db.collection(n).onSnapshot(s=>{for(const k in o)delete o[k];s.docs.forEach(d=>o[d.id]=d.data());ready|=1;render()},e=>{msg="Could not load "+n+" ("+e.code+")";ready|=1;render()})}
+const API="/api",L={},cache={};let ADM="";
+try{if(ADMIN&&!sessionStorage.getItem("adm"))sessionStorage.setItem("adm",prompt("Commissioner passcode")||"");ADM=sessionStorage.getItem("adm")||""}catch(e){}
+async function poll(){
+  try{const r=await fetch(API+"/all",{cache:"no-store"});if(!r.ok)throw 0;const d=await r.json();for(const n in d){cache[n]=d[n];(L[n]||[]).forEach(f=>f())}}
+  catch(e){if(!ready)app.innerHTML='<div class="card">Could not reach the server. Try refreshing.</div>'}
+}
+db={collection:n=>({onSnapshot:cb=>{const f=()=>cb({docs:Object.keys(cache[n]||{}).map(k=>({id:k,data:()=>cache[n][k]}))});(L[n]=L[n]||[]).push(f);if(cache[n])f()}}),
+ doc:p=>{const[c,i]=p.split("/");return{set:async data=>{
+  const r=await fetch(API+"/set",{method:"POST",headers:{"content-type":"application/json","x-admin":ADM},body:JSON.stringify({c,i,data})});
+  if(!r.ok){if(r.status===401){try{sessionStorage.removeItem("adm")}catch(e){}}const e=new Error("save failed");e.code=r.status===401?"wrong passcode":"error "+r.status;throw e}
+  (cache[c]=cache[c]||{})[i]=data;(L[c]||[]).forEach(f=>f())}}}};
+uid="guest";admin=ADMIN;
+sub("drafts",drafts);sub("picks",picks);sub("stats",stats);poll();
+setInterval(()=>{if(!document.hidden&&!pending)poll()},10000);
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)poll()});
+const typing=()=>document.activeElement&&document.activeElement.matches&&document.activeElement.matches("input,select,textarea");
+document.addEventListener("focusout",()=>setTimeout(()=>{if(pending&&!typing()){pending=false;render()}},50));
+window.addEventListener("hashchange",()=>{window._w=null;msg="";pending=false;render();scrollTo(0,0)});
+async function claim(id,d){try{await db.doc("slots/"+dk(id,d)).set({uid,draft:id});msg=""}catch(e){msg="Could not claim: "+e.code;render()}}
+async function setPick(id,d,i,v){
+  v=v.trim();const k=key(v),c=drafts[id];
+  if(k)for(const o of c.drafters)for(let j=0;j<c.slots.length;j++){if((o!==d||j!==i)&&key(pick(id,o,j))===k){msg=v+" is already taken ("+o+", "+c.slots[j]+").";render();return}}
+  const r={...((picks[dk(id,d)]||{}).r||{})};if(v)r[i]=v;else delete r[i];
+  try{await db.doc("picks/"+dk(id,d)).set({r,x:xs(id,d),draft:id});msg=""}catch(e){msg="Could not save pick: "+e.code;render()}
+}
+async function setStat(id,p,f,v){
+  const p0={...((stats[id]||{}).p||{})},k=key(p),e=p0[k]||{name:p,s:{}};
+  p0[k]={name:p,s:{...e.s,[f]:Math.max(0,parseInt(v)||0)}};
+  try{await db.doc("stats/"+id).set({p:p0})}catch(x){msg="Could not save stats: "+x.code;render()}
+}
+async function importStats(id){
+  const t=$("imp").value,c=drafts[id];if(!t.trim())return;
+  const tab=t.includes("\t"),rows=t.split(/\r?\n/).map(l=>(tab?l.split("\t"):l.split(",")).map(x=>x.trim()));
+  const hi=rows.findIndex(r=>r.includes("Player")&&(r.includes("Gls")||r.includes("OG")||r.includes("CrdR")));
+  if(hi<0){msg="Could not find a header row with Player and Gls, OG or CrdR columns.";render();return}
+  const H=rows[hi],ix=n=>H.indexOf(n),pr=rows.slice(hi+1).filter(r=>r[ix("Player")]);
+  const names=[...new Set(c.drafters.flatMap(d=>c.slots.map((_,i)=>pick(id,d,i))).filter(Boolean))];
+  const p0={...((stats[id]||{}).p||{})},miss=[],imp={};let n=0;
+  for(const nm of names){
+    const k=key(nm),m=pr.filter(x=>key(x[ix("Player")])===k);
+    if(m.length!==1){miss.push(nm);continue}
+    const r=m[0],e=p0[k]||{name:nm,s:{}},s={...e.s},g=h=>{const j=ix(h);return j<0?null:(parseInt(r[j])||0)};
+    const set=(f,v)=>{if(v!==null&&c.scoring.some(x=>x.id===f)){s[f]=v;(imp[k]=imp[k]||{})[f]=v}};
+    set("goals",g("Gls"));set("assists",g("Ast"));set("red-cards",g("CrdR"));set("own-goals",g("OG"));
+    if(ix("PKatt")>=0&&ix("PK")>=0)set("pk-misses",Math.max(0,g("PKatt")-g("PK")));
+    p0[k]={name:nm,s};n++;
+  }
+  try{const px=[];for(const d of c.drafters){const doc=picks[dk(id,d)]||{},xx={...(doc.x||{})};let ch=false;for(const i in xx){const m=imp[key(pick(id,d,+i))];if(!m)continue;const b={...(xx[i].b||{})};let hit=false;for(const f in m)if(b[f]===undefined){b[f]=m[f];hit=true}if(hit){xx[i]={...xx[i],b};ch=true}}if(ch)px.push(db.doc("picks/"+dk(id,d)).set({r:doc.r||{},x:xx,draft:id}))}await Promise.all(px);await db.doc("stats/"+id).set({p:p0});msg="Updated "+n+" players."+(miss.length?" No match for: "+miss.join(", ")+" (check the spelling against FBref).":"")}catch(e){msg="Could not save: "+e.code}
+  render();
+}
+function tradeUI(id,d,i){
+  const c=drafts[id],t=xs(id,d)[i],p=pick(id,d,i),lab=`<span class="mu">${esc(c.slots[i])}</span>`;
+  if(t&&p)return`<div class="pk">${lab}<div>${esc(p)} <span class="mu">replaced ${esc(pick(id,d,t.from))}, frozen at ${slotPts(id,d,t.from)} pts</span>${admin?` <button class="g" data-undo="${i}" data-d="${esc(d)}">Undo</button>`:""}</div></div>`;
+  const o=c.slots.map((_,j)=>j).filter(j=>pick(id,d,j)&&!dropped(id,d,j)&&!/^Trade/.test(c.slots[j])).map(j=>`<option value="${j}">${esc(pick(id,d,j))}</option>`).join("");
+  return`<div class="pk">${lab}<div class="row" style="margin:0"><select id="tf${i}">${o}</select><input id="tn${i}" placeholder="New player" autocomplete="off"><button data-trade="${i}" data-d="${esc(d)}">Trade</button></div></div>`;
+}
+async function makeTrade(id,d,i){
+  const f=$("tf"+i),v=$("tn"+i).value.trim();
+  if(!f||!f.value){msg="Choose a player to drop.";render();return}
+  if(!v){msg="Enter the new player.";render();return}
+  const tk=taken(id,d,i,v);if(tk){msg=tk;render();return}
+  const from=+f.value,s=((((stats[id]||{}).p||{})[key(pick(id,d,from))])||{}).s||{},cur=picks[dk(id,d)]||{};
+  const r={...(cur.r||{}),[i]:v},x={...(cur.x||{}),[i]:{from,fr:{...s},b:{...((((stats[id]||{}).p||{})[key(v)]||{}).s||{})},at:Date.now()}};
+  try{await db.doc("picks/"+dk(id,d)).set({r,x,draft:id});msg=""}catch(e){msg="Could not save trade: "+e.code;render()}
+}
+async function undoTrade(id,d,i){
+  const cur=picks[dk(id,d)]||{},r={...(cur.r||{})},x={...(cur.x||{})};delete r[i];delete x[i];
+  try{await db.doc("picks/"+dk(id,d)).set({r,x,draft:id});msg=""}catch(e){msg="Could not undo: "+e.code;render()}
+}
+function parseScoring(t){return t.replace(/−/g,"-").split("\n").map(l=>l.match(/^(.+?)\s*:\s*(-?\d+(?:\.\d+)?)\s*$/)).filter(Boolean).map(m=>({id:key(m[1]),label:m[1].trim(),pts:parseFloat(m[2])}))}
+async function saveCfg(id){
+  const c=drafts[id],g=x=>$(x).value,n=Math.max(1,Math.min(20,+g("sr")||1)),t=Math.max(0,Math.min(6,+g("st")||0));
+  const sl=[...Array(n)].map((_,i)=>"Round "+(i+1)).concat([...Array(t)].map((_,i)=>"Trade "+(i+1)));
+  const dr=g("sd").split(",").map(s=>s.trim()).filter(Boolean),sc=parseScoring(g("ss"));
+  if(!dr.length||!sc.length){msg="Add at least one drafter and one scoring line like “Goals: 2”.";render();return}
+  try{await db.doc("drafts/"+id).set({...c,name:g("sn").trim()||c.name,emoji:g("se").trim()||"🏆",drafters:dr,slots:sl,scoring:sc});msg="Saved."}catch(e){msg="Could not save: "+e.code}render()
+}
+async function newDraft(){
+  const nm=$("nn").value.trim(),id=key(nm);if(!id)return;
+  if(drafts[id]){msg="That draft already exists.";render();return}
+  const f=Object.values(drafts)[0]||{drafters:[]},o=Object.keys(drafts).length;
+  try{await db.doc("drafts/"+id).set({name:nm,emoji:"🏆",order:o,drafters:f.drafters,slots:[1,2,3,4,5,6,7,8].map(i=>"Round "+i).concat(["Trade 1","Trade 2"]),scoring:[{id:"points",label:"Points",pts:1}]});msg="";location.hash=id}catch(e){msg="Could not create: "+e.code;render()}
+}
+function home(){
+  const ids=Object.keys(drafts).sort((a,b)=>(drafts[a].order||0)-(drafts[b].order||0));
+  let h=`<h1>Points Players Playoffs Hub</h1><div class="mu">Choose a draft</div>`;
+  if(!ids.length)h+=`<div class="card mu">No drafts yet.${admin?"":" The owner needs to set them up."}</div>`;
+  h+=`<div class="lb big">`+ids.map(id=>{const c=drafts[id],N=c.drafters.length*c.slots.length,m=c.drafters.reduce((a,d)=>a+made(id,d),0),r=[...c.drafters].sort((a,b)=>total(id,b)-total(id,a))[0];
+    return`<a class="tile" href="#${id}"><span class="em">${esc(c.emoji||"🏆")}</span><b>${esc(c.name)}</b><div class="bar"><i style="width:${N?m/N*100:0}%"></i></div><span class="mu">${m}/${N} picks${m&&r?` · leading: ${esc(r)} (${total(id,r)})`:""}</span></a>`}).join("")+`</div>`;
+  if(admin)h+=`<div class="card"><h2>Add a draft</h2><div class="row"><input id="nn" placeholder="e.g. NBA Playoffs 2027"><button data-new="1">Create</button></div></div>`;
+  return h+`<div class="err">${esc(msg)}</div>`;
+}
+function draftView(id){
+  const c=drafts[id],D=c.drafters,S=c.slots,me=mine(id),N=D.length*S.length,all=D.reduce((a,d)=>a+made(id,d),0),rank=[...D].sort((a,b)=>total(id,b)-total(id,a));
+  let h=`<a href="#">← All drafts</a><h1>${esc(c.emoji||"🏆")} ${esc(c.name)}</h1><div class="mu">${c.scoring.map(s=>esc(s.label)+" "+fmt(s.pts)).join(" · ")}</div>`;
+  h+=`<div class="card"><h2>Draft progress</h2><div class="bar"><i style="width:${N?all/N*100:0}%"></i></div><div class="mu">${all} of ${N} picks made</div></div>`;
+  h+=`<div class="card"><h2>Leaderboard</h2><div class="lb">${rank.map((d,i)=>`<div><span class="mu">#${i+1} ${esc(d)}${d===me?" (you)":""}</span><b>${total(id,d)}</b><div class="bar"><i style="width:${made(id,d)/S.length*100}%"></i></div><span class="mu">${made(id,d)}/${S.length} picks</span></div>`).join("")}</div></div>`;
+  h+=`<div class="card sc"><h2>Picks &amp; points</h2><table><tr><th></th>${D.map(d=>`<th>${esc(d)}</th>`).join("")}</tr>`;
+  S.forEach((r,i)=>{h+=`<tr><th>${esc(r)}</th>${D.map(d=>{const p=pick(id,d,i);return`<td>${p?esc(p)+` <small>${slotPts(id,d,i)} pts${dropped(id,d,i)?" · dropped":""}${xs(id,d)[i]?" · for "+esc(pick(id,d,xs(id,d)[i].from)):""}</small>`:"<small>—</small>"}</td>`}).join("")}</tr>`});
+  h+=`<tr class="tot"><td>Total</td>${D.map(d=>`<td>${total(id,d)}</td>`).join("")}</tr></table></div>`;
+  h+=`<div class="card"><h2>Make your picks</h2>`;
+  if(!uid)h+=`<div class="mu">Sign in to make picks.</div>`;
+  else{
+    const d=me;
+    h+=`<div class="row"><select id="who"><option value="">Who are you?</option>${D.map(x=>`<option${x===d?" selected":""}>${esc(x)}</option>`).join("")}</select></div>`;if(d)h+=S.map((r,i)=>/^Trade/.test(r)?tradeUI(id,d,i):`<div class="pk"><span class="mu">${esc(r)}</span><input data-d="${esc(d)}" data-i="${i}" value="${esc(pick(id,d,i))}" placeholder="Player name" autocomplete="off"></div>`).join("")+`<div class="mu">Saves when you leave the field. Clear it to remove a pick. A trade drops one player (their points freeze at their current total) and adds a new one, who earns points only from the trade onward. Import stats right after a trade to set the new player’s starting point. Trades are final unless the owner undoes them.</div>`;
+  }
+  h+=`<div class="err">${esc(msg)}</div></div>`;
+  const pl=[...new Set(D.flatMap(d=>S.map((_,i)=>pick(id,d,i))).filter(Boolean))],st=(stats[id]&&stats[id].p)||{};
+  if(pl.length)h+=`<div class="card sc"><h2>Player stats${admin?"":" (read only)"}</h2><table><tr><th>Player</th>${c.scoring.map(s=>`<th>${esc(s.label)}</th>`).join("")}<th>Pts</th></tr>${pl.map(p=>{const s=(st[key(p)]||{}).s||{};return`<tr><td>${esc(p)}</td>${c.scoring.map(x=>`<td>${admin?`<input type="number" min="0" value="${s[x.id]||0}" data-p="${esc(p)}" data-f="${esc(x.id)}">`:s[x.id]||0}</td>`).join("")}<td>${pts(id,p)}</td></tr>`}).join("")}</table></div>`;
+  if(admin&&/^ucl/.test(id))h+=`<div class="card"><h2>Import stats from FBref</h2><div class="mu">On the <a href="https://fbref.com/en/comps/8/stats/Champions-League-Stats" target="_blank" rel="noopener">FBref stats page</a>, use Share &amp; Export → Get table as CSV (or copy the table) and paste it here. Own goals come from FBref’s Miscellaneous table, so paste that one too. Each import only updates the columns it contains.</div><textarea id="imp" rows="5" placeholder="Paste table here"></textarea><div class="row"><button data-import="${id}">Import</button></div><div class="err">${esc(msg)}</div></div>`;
+  if(admin)h+=`<details class="card"><summary>Draft settings</summary><div class="row"><input id="sn" value="${esc(c.name)}" placeholder="Name"><input id="se" value="${esc(c.emoji||"")}" size="3" placeholder="🏆"></div>
+<div class="mu">Drafters, comma separated</div><input id="sd" style="width:100%" value="${esc(D.join(", "))}">
+<div class="row"><label class="mu">Rounds <input id="sr" type="number" min="1" max="20" value="${S.filter(x=>/^Round/.test(x)).length}" style="width:64px"></label><label class="mu">Trade slots <input id="st" type="number" min="0" max="6" value="${S.filter(x=>/^Trade/.test(x)).length}" style="width:64px"></label></div>
+<div class="mu">Scoring, one per line as “Label: points” (renaming a line resets its stats)</div><textarea id="ss" rows="6">${esc(c.scoring.map(s=>s.label+": "+s.pts).join("\n"))}</textarea>
+<div class="row"><button data-save="${id}">Save settings</button></div></details>`;
+  return h;
+}
+function render(){
+  if(!ready)return;if(typing()){pending=true;return}
+  const id=location.hash.slice(1);app.innerHTML=drafts[id]?draftView(id):home();
+}
+document.addEventListener("change",e=>{const t=e.target,id=location.hash.slice(1);if(!drafts[id])return;
+  if(t.id==="who"){window._w=t.value;try{localStorage.setItem("who-"+id,t.value)}catch(e){}render()}
+  else if(t.dataset.i!==undefined)setPick(id,t.dataset.d,+t.dataset.i,t.value);
+  else if(t.dataset.f)setStat(id,t.dataset.p,t.dataset.f,t.value)});
+document.addEventListener("click",e=>{const t=e.target,id=location.hash.slice(1);
+  if(t.dataset&&t.dataset.claim)claim(id,t.dataset.claim);
+  else if(t.dataset&&t.dataset.save)saveCfg(t.dataset.save);
+  else if(t.dataset&&t.dataset.import)importStats(t.dataset.import);
+  else if(t.dataset&&t.dataset.trade)makeTrade(id,t.dataset.d,+t.dataset.trade);
+  else if(t.dataset&&t.dataset.undo)undoTrade(id,t.dataset.d,+t.dataset.undo);
+  else if(t.dataset&&t.dataset.new)newDraft()});
+</script></body></html>

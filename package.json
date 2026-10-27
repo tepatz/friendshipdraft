@@ -1,0 +1,7 @@
+{
+  "name": "draft-hub",
+  "private": true,
+  "dependencies": {
+    "@netlify/blobs": "latest"
+  }
+}
